@@ -303,6 +303,43 @@ $sectioninfo = get_fast_modinfo($course->id)->get_section_info($sectionnumber);
 
 ---
 
+### 🚫 Anti-Pattern: Overriding get_template_name() on section class and expecting it to change the rendered template
+
+**Root cause:** The `courseformat_named_templatable` trait's `get_template_name()` is only called when `$output->render($section)` is invoked **directly** in PHP. In the normal page-load flow, sections are rendered as Mustache **partials** inside the content template — the partial name in the `.mustache` file determines which template is used, not the PHP class method.
+
+The core content template (`core_courseformat/local/content.mustache`) contains:
+```mustache
+{{#sections}}
+    {{$ core_courseformat/local/content/section }}
+        {{> core_courseformat/local/content/section }}
+    {{/ core_courseformat/local/content/section }}
+{{/sections}}
+```
+Overriding `get_template_name()` on the section PHP class has **no effect** on this partial — sections still render using `core_courseformat/local/content/section.mustache`.
+
+**✅ CORRECT — two-step approach:**
+
+1. Override `get_template_name()` in the **content** class (not just the section class):
+```php
+// classes/output/courseformat/content.php
+public function get_template_name(\renderer_base $renderer): string {
+    return 'format_[formatname]/local/content';
+}
+```
+
+2. Create `templates/local/content.mustache` that inherits from core and overrides the section block:
+```mustache
+{{< core_courseformat/local/content }}
+    {{$ core_courseformat/local/content/section }}
+        {{> format_[formatname]/local/content/section }}
+    {{/ core_courseformat/local/content/section }}
+{{/ core_courseformat/local/content }}
+```
+
+**Your section class still needs `get_template_name()`** — it is called for standalone AJAX-driven re-renders of individual sections. But the content template override is what makes the initial page load use your custom section template.
+
+---
+
 ### ✅ Pattern: AMD build requirement
 
 After editing any `amd/src/*.js` file, compile with grunt before testing or committing:

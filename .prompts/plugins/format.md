@@ -799,3 +799,31 @@ Always add `classes/privacy/provider.php` implementing `null_provider`, even if 
 ### 6. `restore_format_*_plugin` class name mismatch → restore fails
 
 The class name in the backup file must exactly match `restore_format_[formatname]_plugin` and the file must be at `backup/moodle2/restore_format_[formatname]_plugin.class.php`.
+
+### 7. Custom section template is never used — core section template renders instead
+
+**Root cause:** `get_template_name()` on the section class is only called when `$output->render($section)` is called directly. In the normal flow, the section is exported as data via `export_for_template()` and then rendered as a Mustache partial inside the content template — the partial name in the template determines which `.mustache` file is used, not `get_template_name()`.
+
+The core content template (`core_courseformat/local/content.mustache`) hardcodes `{{> core_courseformat/local/content/section }}` as the section partial. Overriding `get_template_name()` on the section PHP class has **no effect** on this partial resolution.
+
+**Fix:** You must override the content template to use your section partial. This requires two steps:
+
+1. Override `get_template_name()` in the **content** class (`classes/output/courseformat/content.php`):
+```php
+public function get_template_name(\renderer_base $renderer): string {
+    return 'format_[formatname]/local/content';
+}
+```
+
+2. Create `templates/local/content.mustache` that inherits from core and overrides the section block:
+```mustache
+{{< core_courseformat/local/content }}
+    {{$ core_courseformat/local/content/section }}
+        {{> format_[formatname]/local/content/section }}
+    {{/ core_courseformat/local/content/section }}
+{{/ core_courseformat/local/content }}
+```
+
+Moodle's Mustache implementation supports template inheritance via `{{< parent }}` with `{{$ block }}` overrides. Any block defined with `{{$ name }}` in the parent template can be replaced in the child.
+
+Your section class (`classes/output/courseformat/content/section.php`) still needs `get_template_name()` — it's called when sections are rendered standalone (e.g., AJAX refreshes). But for the initial page load, the template override chain above is what matters.
